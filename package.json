@@ -1,0 +1,10 @@
+{
+  "name": "dynox-order-tracking",
+  "version": "1.0.0",
+  "description": "Lets Dynox customers track their made-to-order status by order number + email (Shopify App Proxy).",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node server.js", "test": "node test/test.js" },
+  "license": "UNLICENSED"
+}

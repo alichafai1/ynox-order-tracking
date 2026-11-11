@@ -1,0 +1,13 @@
+# Optional: only if you use Shopify CLI. Otherwise set the same values in the Dev Dashboard (see SETUP.md).
+name = "Dynox Order Tracking"
+client_id = "PASTE_CLIENT_ID"
+application_url = "https://YOUR-APP.onrender.com"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders,read_all_orders,write_app_proxy"
+
+[app_proxy]
+url = "https://YOUR-APP.onrender.com/proxy"
+prefix = "apps"
+subpath = "track"
