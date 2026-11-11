@@ -10,6 +10,9 @@
  *   SHOPIFY_CLIENT_ID      from Dev Dashboard > your app > Settings
  *   SHOPIFY_CLIENT_SECRET  from Dev Dashboard > your app > Settings
  *   DEBUG_KEY              any long random text; lets you open /debug to see an order's metafields
+ *   APP_URL                this app's public address, e.g. https://dynox-order-tracking.onrender.com
+ *   SHOPIFY_ACCESS_TOKEN   only for "install link" setup (app made in your own Dev Dashboard):
+ *                          shown once after install at /auth/callback; paste it here.
  *   API_VERSION            optional, default 2026-04
  *   PORT                   set automatically by most hosts
  */
@@ -26,15 +29,24 @@ const DEBUG_KEY = process.env.DEBUG_KEY || '';
 const API_VERSION = process.env.API_VERSION || '2026-04';
 const SHOP_BASE = process.env.SHOP_API_BASE || `https://${SHOP}.myshopify.com`; // override only for tests
 const PORT = process.env.PORT || 3000;
+const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '');
+const STATIC_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN || '';
+const SCOPES = 'read_orders,read_all_orders';
 
+// Files can sit in their folders (config/, views/) or next to server.js
+function findFile(folder, name) {
+  const a = path.join(__dirname, folder, name);
+  return fs.existsSync(a) ? a : path.join(__dirname, name);
+}
 function loadConfig() {
-  return JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'steps.json'), 'utf8'));
+  return JSON.parse(fs.readFileSync(findFile('config', 'steps.json'), 'utf8'));
 }
 
 /* ---------------- Admin API token (client credentials, cached ~23h) ---------------- */
 let token = null, tokenExpires = 0;
 async function getToken() {
-  if (token && Date.now() < tokenExpires) return token;
+  if (STATIC_TOKEN) return STATIC_TOKEN;                 // install-link setup
+  if (token && Date.now() < tokenExpires) return token;  // same-organization setup
   const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: CLIENT_ID, client_secret: CLIENT_SECRET });
   const r = await fetch(`${SHOP_BASE}/admin/oauth/access_token`, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
@@ -139,6 +151,17 @@ function verifyProxy(searchParams) {
   return fresh && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(calc));
 }
 
+/* ---------------- Install (OAuth) for apps made outside the store's organization ---------------- */
+function verifyOAuthHmac(searchParams) {
+  const h = searchParams.get('hmac') || '';
+  const msg = [...searchParams].filter(([k]) => k !== 'hmac' && k !== 'signature')
+    .map(([k, v]) => `${k}=${v}`).sort().join('&');
+  const calc = crypto.createHmac('sha256', CLIENT_SECRET).update(msg).digest('hex');
+  return h.length === calc.length && crypto.timingSafeEqual(Buffer.from(h), Buffer.from(calc));
+}
+const validShop = s => /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(s || '');
+const states = new Map();
+
 /* ---------------- Simple rate limit (per visitor IP) ---------------- */
 const hits = new Map();
 function limited(ip) {
@@ -151,7 +174,7 @@ function limited(ip) {
 
 /* ---------------- Page (Liquid, rendered inside the theme) ---------------- */
 function pageLiquid(prefix) {
-  return fs.readFileSync(path.join(__dirname, 'views', 'track.liquid'), 'utf8').replace(/__PREFIX__/g, prefix);
+  return fs.readFileSync(findFile('views', 'track.liquid'), 'utf8').replace(/__PREFIX__/g, prefix);
 }
 
 function send(res, status, type, body) {
@@ -165,6 +188,35 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname.replace(/\/+$/, '') || '/';
+
+    // Install start: Shopify opens the App URL with ?shop=...&hmac=... after the install link is used
+    if ((p === '/' || p === '/auth') && url.searchParams.get('shop')) {
+      const shop = url.searchParams.get('shop');
+      if (!validShop(shop)) return send(res, 400, 'text/plain', 'Bad shop');
+      if (url.searchParams.get('hmac') && !verifyOAuthHmac(url.searchParams)) return send(res, 401, 'text/plain', 'Unauthorized');
+      if (STATIC_TOKEN && p === '/') return send(res, 200, 'text/html; charset=utf-8', '<p style="font:16px system-ui;padding:40px">Dynox Order Tracking is installed and running. Customers use <b>/apps/track</b> on your store.</p>');
+      const state = crypto.randomBytes(16).toString('hex'); states.set(state, Date.now());
+      const redirect = `${APP_URL}/auth/callback`;
+      res.writeHead(302, { Location: `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(CLIENT_ID)}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(redirect)}&state=${state}` });
+      return res.end();
+    }
+    if (p === '/auth/callback') {
+      const q = url.searchParams, shop = q.get('shop'), state = q.get('state');
+      if (!validShop(shop) || !verifyOAuthHmac(q) || !states.has(state)) return send(res, 401, 'text/plain', 'Unauthorized');
+      states.delete(state);
+      const r = await fetch(`${process.env.SHOP_API_BASE || 'https://' + shop}/admin/oauth/access_token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, code: q.get('code') }),
+      });
+      const j = await r.json();
+      if (!j.access_token) return send(res, 500, 'text/plain', 'Install failed: ' + JSON.stringify(j));
+      const esc = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      return send(res, 200, 'text/html; charset=utf-8', `<div style="font:16px/1.5 system-ui;max-width:720px;margin:40px auto;padding:0 20px">
+        <h2>Almost done: copy this access token</h2>
+        <p>On Render, open your service → <b>Environment</b> → add <b>SHOPIFY_ACCESS_TOKEN</b> with this value, and <b>SHOPIFY_SHOP</b> = <b>${esc(shop.replace('.myshopify.com', ''))}</b>. Save (the app restarts).</p>
+        <p style="background:#F4F6F5;padding:14px;border-radius:10px;word-break:break-all;font-family:monospace">${esc(j.access_token)}</p>
+        <p style="color:#9A5530">Keep it secret. It is shown only now. Scopes granted: ${esc(j.scope || '')}</p></div>`);
+    }
 
     if (p === '/') return send(res, 200, 'text/plain', 'Dynox Order Tracking is running.');
 
