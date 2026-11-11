@@ -1,0 +1,14 @@
+{
+  "_help": "Each step can read a date from an order metafield ('namespace.key'). A step is DONE when its metafield has a value. Use /debug to see the real metafield names on an order, then fill them in here.",
+  "statusMetafield": "",
+  "steps": [
+    { "name": "Order confirmed",     "metafield": "", "useOrderDate": true },
+    { "name": "In production",       "metafield": "" },
+    { "name": "Container loaded",    "metafield": "" },
+    { "name": "Ocean shipping",      "metafield": "" },
+    { "name": "Arrived in the U.S.", "metafield": "" },
+    { "name": "At U.S. warehouse",   "metafield": "" },
+    { "name": "Final delivery",      "metafield": "", "doneWhenFulfilled": true }
+  ],
+  "etaMetafield": ""
+}

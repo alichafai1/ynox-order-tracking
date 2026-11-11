@@ -1,0 +1,92 @@
+{% comment %} Dynox Order Tracking page. Served by the app through the App Proxy and shown inside the store's theme. {% endcomment %}
+<style>
+  .dxt{--g:#1F3D36;--c:#9A5530;--line:#DFE5E2;--mist:#F4F6F5;--muted:#55605B;--ink:#1E2B27;--sage:#7F8D86;max-width:760px;margin:0 auto;padding:56px 20px 80px;color:var(--ink);letter-spacing:normal}
+  .dxt *{box-sizing:border-box}
+  .dxt-head{text-align:center;margin-bottom:32px}
+  .dxt-eye{display:block;font-size:13px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:var(--muted)}
+  .dxt h1{margin:10px 0 12px;font-size:clamp(34px,4vw,50px);line-height:1.1}
+  .dxt-lead{margin:0 auto;max-width:560px;font-size:18px;line-height:1.5;color:var(--muted)}
+  .dxt-form{display:grid;grid-template-columns:1fr 1fr auto;gap:14px;align-items:end;padding:24px;border:1px solid var(--line);border-radius:20px;background:#fff}
+  .dxt-form label{display:flex;flex-direction:column;gap:8px;font-size:15px;font-weight:600}
+  .dxt-form input{width:100%;min-height:52px;padding:0 16px;border:1.5px solid var(--sage);border-radius:12px;font:inherit;font-size:17px;color:var(--ink);background:#fff}
+  .dxt-btn{min-height:52px;padding:0 28px;border:none;border-radius:999px;background:var(--g);color:#fff;font:inherit;font-size:16px;font-weight:700;cursor:pointer}
+  .dxt-btn:disabled{opacity:.6}
+  .dxt-out{margin-top:28px}
+  .dxt-msg{text-align:center;color:var(--muted);margin:0}
+  .dxt-top{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:20px}
+  .dxt-top strong.o{font-size:26px}
+  .dxt-steps{list-style:none;margin:0;padding:0}
+  .dxt-steps li{position:relative;display:flex;gap:16px;padding-bottom:22px}
+  .dxt-steps li:not(:last-child)::after{content:"";position:absolute;left:19px;top:40px;bottom:-4px;width:2px;background:var(--line)}
+  .dxt-steps li.done::after{background:var(--g)}
+  .dxt-dot{position:relative;z-index:1;flex:0 0 40px;width:40px;height:40px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--sage);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
+  .done .dxt-dot{background:var(--g);border-color:var(--g);color:#fff}
+  .current .dxt-dot{border:2px solid var(--c);color:var(--c)}
+  .dxt-steps li>div{padding-top:8px}
+  .dxt-n{font-size:17px;color:var(--muted)}
+  .done .dxt-n,.current .dxt-n{color:var(--ink);font-weight:600}
+  .dxt-now{margin-left:8px;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--c)}
+  .dxt-d{font-size:14px;color:var(--muted)}
+  .dxt-help{margin-top:28px;padding:20px;border-radius:16px;background:var(--mist);display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+  @media (max-width:749px){.dxt{padding:36px 17px 56px}.dxt-form{grid-template-columns:1fr;padding:20px}.dxt-btn{width:100%}}
+</style>
+
+<div class="dxt">
+  <div class="dxt-head">
+    <span class="dxt-eye">Made to order</span>
+    <h1>Track your order</h1>
+    <p class="dxt-lead">Enter your order number and the email you used at checkout to see where your chair is.</p>
+  </div>
+
+  <form class="dxt-form" id="dxt-form" novalidate>
+    <label>Order number<input name="order" type="text" inputmode="numeric" placeholder="#1001" autocomplete="off" required></label>
+    <label>Email<input name="email" type="email" placeholder="you@email.com" autocomplete="email" required></label>
+    <button class="dxt-btn" type="submit">Track</button>
+  </form>
+
+  <div class="dxt-out" id="dxt-out" aria-live="polite"></div>
+
+  <div class="dxt-help">
+    <div><strong>Questions about your order?</strong><div class="dxt-d">Mon–Fri, 9 AM–5 PM ET</div></div>
+    <a href="tel:+18007350101" style="font-weight:700">Call (800) 735-0101</a>
+  </div>
+  {% if shop.customer_accounts_enabled %}
+    <p class="dxt-d" style="text-align:center;margin-top:16px">Have an account? <a href="{{ routes.account_url }}">Sign in</a> to see all your orders.</p>
+  {% endif %}
+</div>
+
+<script>
+(function(){
+  var form=document.getElementById('dxt-form'), out=document.getElementById('dxt-out'), btn=form.querySelector('button');
+  var params=new URLSearchParams(location.search);
+  if(params.get('order')) form.order.value=params.get('order');
+  if(params.get('email')) form.email.value=params.get('email');
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function msg(t){out.innerHTML='<p class="dxt-msg">'+t+'</p>';}
+  function render(d){
+    var h='<div class="dxt-top"><strong class="o">Order '+esc(d.order)+'</strong>'+(d.eta?'<span class="dxt-d">Estimated delivery: <strong>'+esc(d.eta)+'</strong></span>':'')+'</div>';
+    if(d.cancelled){out.innerHTML=h+'<p class="dxt-msg">This order was cancelled. Please call us if you have questions.</p>';return;}
+    h+='<ol class="dxt-steps">';
+    (d.steps||[]).forEach(function(s,i){
+      var icon=s.status==='done'?'✓':(s.status==='current'?'●':(i+1));
+      h+='<li class="'+esc(s.status)+'"><span class="dxt-dot" aria-hidden="true">'+icon+'</span><div><div class="dxt-n">'+esc(s.name)+(s.status==='current'?'<span class="dxt-now">Current step</span>':'')+'</div>'+(s.date?'<div class="dxt-d">'+esc(s.date)+'</div>':'')+'</div></li>';
+    });
+    out.innerHTML=h+'</ol>';
+  }
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var order=form.order.value.trim().replace(/^#/,''), email=form.email.value.trim();
+    if(!order||!email){msg('Please enter your order number and email.');return;}
+    btn.disabled=true; msg('Checking your order…');
+    fetch('__PREFIX__/status?order='+encodeURIComponent(order)+'&email='+encodeURIComponent(email),{headers:{'Accept':'application/json'}})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j};});})
+      .then(function(x){
+        if(x.ok&&x.j.steps) render(x.j);
+        else if(x.status===429) msg('Too many tries. Please wait a few minutes, or call us.');
+        else msg('We couldn\'t find that order. Check the order number and email, or call us.');
+      })
+      .catch(function(){msg('Something went wrong. Please try again or call us.');})
+      .then(function(){btn.disabled=false;});
+  });
+})();
+</script>
